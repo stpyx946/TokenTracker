@@ -19,7 +19,15 @@ function readQueueData(queuePath) {
   try {
     const raw = fs.readFileSync(queuePath, "utf8");
     const lines = raw.split("\n").filter((l) => l.trim());
-    return lines.map((l) => JSON.parse(l));
+    const parsed = lines.map((l) => JSON.parse(l));
+    // Deduplicate: each sync appends cumulative totals per bucket, so for
+    // each (source, model, hour_start) keep only the latest (last) entry.
+    const seen = new Map();
+    for (const row of parsed) {
+      const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
+      seen.set(key, row);
+    }
+    return Array.from(seen.values());
   } catch (_e) {
     return [];
   }

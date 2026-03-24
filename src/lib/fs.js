@@ -47,16 +47,30 @@ async function chmod600IfPossible(filePath) {
   } catch (_e) {}
 }
 
+const LOCK_STALE_MS = 5 * 60 * 1000; // 5 minutes
+
 async function openLock(lockPath, { quietIfLocked }) {
   try {
     const handle = await fs.open(lockPath, "wx");
     return {
       async release() {
         await handle.close().catch(() => {});
+        await fs.unlink(lockPath).catch(() => {});
       },
     };
   } catch (e) {
     if (e && e.code === "EEXIST") {
+      // Check if lock is stale
+      try {
+        const stat = await fs.stat(lockPath);
+        if (Date.now() - stat.mtimeMs > LOCK_STALE_MS) {
+          await fs.unlink(lockPath).catch(() => {});
+          return openLock(lockPath, { quietIfLocked });
+        }
+      } catch (_statErr) {
+        // Lock file disappeared between checks, retry
+        return openLock(lockPath, { quietIfLocked });
+      }
       if (!quietIfLocked) {
         process.stdout.write("Another sync is already running.\n");
       }
