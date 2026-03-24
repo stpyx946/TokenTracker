@@ -45,9 +45,9 @@ import { ActivityHeatmap } from "../ui/matrix-a/components/ActivityHeatmap.jsx";
 import { ProjectUsagePanel } from "../ui/matrix-a/components/ProjectUsagePanel.jsx";
 import { DashboardView } from "../ui/matrix-a/views/DashboardView.jsx";
 
-const PERIODS = ["day", "week", "month", "total"];
+const PERIODS = ["day", "week", "month", "total", "custom"];
 const DETAILS_DATE_KEYS = new Set(["day", "hour", "month"]);
-const DETAILS_PAGED_PERIODS = new Set(["day", "total"]);
+const DETAILS_PAGED_PERIODS = new Set(["day", "total", "custom"]);
 
 function hasUsageValue(value, level) {
   if (typeof level === "number" && level > 0) return true;
@@ -426,16 +426,20 @@ export function DashboardPage({
   const mockNow = useMemo(() => getMockNow(), []);
   const cacheKey = publicMode ? null : auth?.userId || auth?.email || "default";
   const [selectedPeriod, setSelectedPeriod] = useState("month");
+  const [customFrom, setCustomFrom] = useState(null);
+  const [customTo, setCustomTo] = useState(null);
+  const [customRangeOpen, setCustomRangeOpen] = useState(false);
   const period = screenshotMode ? "total" : selectedPeriod;
-  const range = useMemo(
-    () =>
-      getRangeForPeriod(period, {
-        timeZone,
-        offsetMinutes: tzOffsetMinutes,
-        now: mockNow,
-      }),
-    [mockNow, period, timeZone, tzOffsetMinutes],
-  );
+  const range = useMemo(() => {
+    if (period === "custom" && customFrom && customTo) {
+      return { from: customFrom, to: customTo };
+    }
+    return getRangeForPeriod(period, {
+      timeZone,
+      offsetMinutes: tzOffsetMinutes,
+      now: mockNow,
+    });
+  }, [mockNow, period, timeZone, tzOffsetMinutes, customFrom, customTo]);
   const from = range.from;
   const to = range.to;
   const timeZoneLabel = useMemo(
@@ -772,6 +776,38 @@ export function DashboardPage({
 
     return count;
   }, [signedIn, mockEnabled, heatmap?.active_days, heatmap?.weeks, heatmapDaily]);
+
+  const [prevPeriod, setPrevPeriod] = useState("month");
+  const handlePeriodChange = useCallback((p) => {
+    if (p === "custom") {
+      setPrevPeriod((prev) => (prev === "custom" ? "month" : prev));
+      setSelectedPeriod((cur) => {
+        // If already have custom dates, switch to custom immediately
+        if (customFrom && customTo) return "custom";
+        return cur;
+      });
+      setCustomRangeOpen(true);
+    } else {
+      setSelectedPeriod(p);
+      setPrevPeriod(p);
+      setCustomRangeOpen(false);
+    }
+  }, [customFrom, customTo]);
+
+  const handleCustomRangeApply = useCallback((fromDate, toDate) => {
+    setCustomFrom(fromDate);
+    setCustomTo(toDate);
+    setSelectedPeriod("custom");
+    setCustomRangeOpen(false);
+  }, []);
+
+  const handleCustomRangeOpenChange = useCallback((open) => {
+    setCustomRangeOpen(open);
+    // If popover closed without applying and no custom dates exist, revert
+    if (!open && selectedPeriod === "custom" && !customFrom) {
+      setSelectedPeriod(prevPeriod);
+    }
+  }, [selectedPeriod, customFrom, prevPeriod]);
 
   const refreshAll = useCallback(async () => {
     await Promise.all([
@@ -1366,7 +1402,12 @@ export function DashboardPage({
       screenshotTwitterButton={screenshotTwitterButton}
       screenshotTwitterHint={screenshotTwitterHint}
       periodsForDisplay={periodsForDisplay}
-      setSelectedPeriod={setSelectedPeriod}
+      setSelectedPeriod={handlePeriodChange}
+      customFrom={customFrom}
+      customTo={customTo}
+      onCustomRangeApply={handleCustomRangeApply}
+      customRangeOpen={customRangeOpen}
+      onCustomRangeOpenChange={handleCustomRangeOpenChange}
       metricsRows={metricsRows}
       summaryLabel={summaryLabel}
       summaryValue={summaryValue}

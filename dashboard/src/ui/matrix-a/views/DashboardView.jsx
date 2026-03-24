@@ -53,6 +53,11 @@ export function DashboardView(props) {
     screenshotTwitterHint,
     periodsForDisplay,
     setSelectedPeriod,
+    customFrom,
+    customTo,
+    onCustomRangeApply,
+    customRangeOpen,
+    onCustomRangeOpenChange,
     summaryLabel,
     summaryValue,
     summaryCostValue,
@@ -253,6 +258,11 @@ export function DashboardView(props) {
                   fleetData={fleetData}
                   onRefresh={screenshotMode ? null : refreshAll}
                   loading={usageLoadingState}
+                  customFrom={customFrom}
+                  customTo={customTo}
+                  onCustomRangeApply={onCustomRangeApply}
+                  customRangeOpen={customRangeOpen}
+                  onCustomRangeOpenChange={onCustomRangeOpenChange}
                 />
 
                 {!screenshotMode ? (

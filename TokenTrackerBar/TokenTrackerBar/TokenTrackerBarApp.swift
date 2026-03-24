@@ -31,7 +31,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 viewModel.startAutoRefresh()
             }
 
-            // Silent update check on launch
             UpdateChecker.shared.check(silent: true)
         }
     }

@@ -7,14 +7,23 @@ final class UpdateChecker {
     static let shared = UpdateChecker()
 
     private let repo = "mm7894215/tokentracker"
-    private var isChecking = false
+
+    /// Observable status for menu item display
+    private(set) var statusText: String? = nil
+    private(set) var isBusy = false
+
+    /// Download progress tracking
+    private var progressTimer: Timer?
+
+    /// Cached app icon for alerts (capture before activationPolicy changes)
+    private lazy var appIcon: NSImage? = NSApp.applicationIconImage
 
     // MARK: - Public
 
-    /// Check for updates. If `silent`, suppress "already up to date" alert.
     func check(silent: Bool = false) {
-        guard !isChecking else { return }
-        isChecking = true
+        guard !isBusy else { return }
+        isBusy = true
+        statusText = "Checking for updates..."
 
         Task.detached { [self] in
             let result: Result<GitHubRelease, Error>
@@ -25,13 +34,12 @@ final class UpdateChecker {
             }
 
             await MainActor.run {
-                self.isChecking = false
                 self.handleResult(result, silent: silent)
             }
         }
     }
 
-    // MARK: - GitHub API via curl
+    // MARK: - GitHub API
 
     private struct GitHubRelease: Decodable {
         let tag_name: String
@@ -55,67 +63,20 @@ final class UpdateChecker {
         }
     }
 
-    /// Use curl subprocess — inherits system proxy, bypasses URLSession issues.
     nonisolated private func fetchLatestRelease() throws -> GitHubRelease {
         let urlString = "https://api.github.com/repos/\(repo)/releases/latest"
-
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        process.arguments = [
-            "-s", "--max-time", "15",
-            "-H", "Accept: application/vnd.github+json",
-            urlString
-        ]
-
+        process.arguments = ["-s", "--max-time", "15", "-H", "Accept: application/vnd.github+json", urlString]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
-
         try process.run()
         process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            throw UpdateError.curlFailed(Int(process.terminationStatus))
-        }
-
+        guard process.terminationStatus == 0 else { throw UpdateError.curlFailed(Int(process.terminationStatus)) }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        guard !data.isEmpty else {
-            throw UpdateError.emptyResponse
-        }
-
+        guard !data.isEmpty else { throw UpdateError.emptyResponse }
         return try JSONDecoder().decode(GitHubRelease.self, from: data)
-    }
-
-    /// Download file via curl to ~/Downloads, returns local file URL.
-    nonisolated private func downloadViaCurl(from urlString: String, fileName: String) throws -> URL {
-        let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        let destURL = downloadsDir.appendingPathComponent(fileName)
-
-        // Remove existing file
-        if FileManager.default.fileExists(atPath: destURL.path) {
-            try FileManager.default.removeItem(at: destURL)
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
-        process.arguments = [
-            "-L", "-s", "--max-time", "300",
-            "-o", destURL.path,
-            urlString
-        ]
-        process.standardOutput = Pipe()
-        process.standardError = Pipe()
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0,
-              FileManager.default.fileExists(atPath: destURL.path) else {
-            throw UpdateError.downloadFailed
-        }
-
-        return destURL
     }
 
     // MARK: - Result Handling
@@ -126,38 +87,38 @@ final class UpdateChecker {
             let current = currentVersion()
             if compareVersions(current, release.tagVersion) == .orderedAscending {
                 promptUpdate(release: release, currentVersion: current)
-            } else if !silent {
-                showAlert(
-                    title: "已是最新版本",
-                    message: "当前版本 \(current) 已经是最新。",
-                    style: .informational
-                )
+            } else {
+                finishUpdate()
+                if !silent {
+                    showAlert(title: "You're Up to Date", message: "Version \(current) is the latest version.", style: .informational)
+                }
             }
         case .failure(let error):
+            finishUpdate()
             if !silent {
-                showAlert(
-                    title: "检查更新失败",
-                    message: error.localizedDescription,
-                    style: .warning
-                )
+                showAlert(title: "Update Check Failed", message: error.localizedDescription, style: .warning)
             }
         }
     }
 
-    // MARK: - Version Comparison
+    private func finishUpdate() {
+        isBusy = false
+        statusText = nil
+    }
 
-    private func currentVersion() -> String {
+    // MARK: - Version
+
+    func currentVersion() -> String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
 
     private func compareVersions(_ a: String, _ b: String) -> ComparisonResult {
-        let partsA = a.split(separator: ".").compactMap { Int($0) }
-        let partsB = b.split(separator: ".").compactMap { Int($0) }
-        let count = max(partsA.count, partsB.count)
-
+        let pa = a.split(separator: ".").compactMap { Int($0) }
+        let pb = b.split(separator: ".").compactMap { Int($0) }
+        let count = max(pa.count, pb.count)
         for i in 0..<count {
-            let va = i < partsA.count ? partsA[i] : 0
-            let vb = i < partsB.count ? partsB[i] : 0
+            let va = i < pa.count ? pa[i] : 0
+            let vb = i < pb.count ? pb[i] : 0
             if va < vb { return .orderedAscending }
             if va > vb { return .orderedDescending }
         }
@@ -167,25 +128,25 @@ final class UpdateChecker {
     // MARK: - UI
 
     private func promptUpdate(release: GitHubRelease, currentVersion: String) {
+        isBusy = false
+        statusText = nil
+
         let alert = NSAlert()
-        alert.messageText = "发现新版本 \(release.tagVersion)"
+        alert.messageText = "New Version Available — \(release.tagVersion)"
         alert.informativeText = buildUpdateMessage(release: release, currentVersion: currentVersion)
         alert.alertStyle = .informational
+        alert.icon = appIcon
+        alert.addButton(withTitle: release.dmgAsset != nil ? "Download & Install" : "View on GitHub")
+        alert.addButton(withTitle: "Later")
 
-        if release.dmgAsset != nil {
-            alert.addButton(withTitle: "下载并安装")
-            alert.addButton(withTitle: "稍后再说")
-        } else {
-            alert.addButton(withTitle: "前往下载")
-            alert.addButton(withTitle: "稍后再说")
-        }
-
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
+        NSApp.setActivationPolicy(.accessory)
 
         if response == .alertFirstButtonReturn {
             if let dmg = release.dmgAsset {
-                startDownload(dmg)
+                startDownloadAndInstall(dmg)
             } else if let url = URL(string: release.html_url) {
                 NSWorkspace.shared.open(url)
             }
@@ -193,20 +154,43 @@ final class UpdateChecker {
     }
 
     private func buildUpdateMessage(release: GitHubRelease, currentVersion: String) -> String {
-        var lines = ["当前版本: \(currentVersion) → \(release.tagVersion)"]
+        var lines = ["Current: \(currentVersion) → \(release.tagVersion)"]
         if let body = release.body, !body.isEmpty {
-            let summary = body.prefix(300)
-            lines.append("\n更新内容:\n\(summary)")
+            lines.append("\nRelease Notes:\n\(body.prefix(300))")
             if body.count > 300 { lines.append("…") }
         }
         if let dmg = release.dmgAsset {
-            let sizeMB = String(format: "%.1f", Double(dmg.size) / 1_048_576)
-            lines.append("\n文件大小: \(sizeMB) MB")
+            lines.append("\nSize: \(String(format: "%.1f", Double(dmg.size) / 1_048_576)) MB")
         }
         return lines.joined()
     }
 
-    private func startDownload(_ asset: GitHubRelease.Asset) {
+    // MARK: - Download + Install
+
+    private func startDownloadAndInstall(_ asset: GitHubRelease.Asset) {
+        isBusy = true
+        let totalSize = Int64(asset.size)
+        let totalMB = Double(totalSize) / 1_048_576
+        statusText = "Downloading 0%..."
+
+        let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let destPath = downloadsDir.appendingPathComponent(asset.name).path
+
+        // Start polling file size for progress
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                let attrs = try? FileManager.default.attributesOfItem(atPath: destPath)
+                let received = (attrs?[.size] as? Int64) ?? 0
+                if totalSize > 0 {
+                    let pct = min(Int(Double(received) / Double(totalSize) * 100), 99)
+                    let receivedMB = Double(received) / 1_048_576
+                    self.statusText = "Downloading \(pct)% (\(String(format: "%.0f", receivedMB))/\(String(format: "%.0f", totalMB)) MB)"
+                }
+            }
+        }
+
         Task.detached { [self] in
             let result: Result<URL, Error>
             do {
@@ -216,43 +200,64 @@ final class UpdateChecker {
             }
 
             await MainActor.run {
+                self.progressTimer?.invalidate()
+                self.progressTimer = nil
+
                 switch result {
                 case .success(let dmgURL):
-                    self.installFromDMG(dmgURL)
+                    self.statusText = "Installing..."
+                    self.performInstallAsync(dmgURL)
                 case .failure(let error):
-                    self.showAlert(
-                        title: "下载失败",
-                        message: error.localizedDescription,
-                        style: .warning
-                    )
+                    self.finishUpdate()
+                    self.showAlert(title: "Download Failed", message: error.localizedDescription, style: .warning)
                 }
             }
         }
     }
 
-    // MARK: - Auto Install
+    nonisolated private func downloadViaCurl(from urlString: String, fileName: String) throws -> URL {
+        let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let destURL = downloadsDir.appendingPathComponent(fileName)
+        if FileManager.default.fileExists(atPath: destURL.path) {
+            try FileManager.default.removeItem(at: destURL)
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/curl")
+        process.arguments = ["-L", "-s", "--max-time", "300", "-o", destURL.path, urlString]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0, FileManager.default.fileExists(atPath: destURL.path) else {
+            throw UpdateError.downloadFailed
+        }
+        return destURL
+    }
 
-    /// Mount DMG, copy .app to /Applications, unmount, relaunch.
-    private func installFromDMG(_ dmgURL: URL) {
+    private func performInstallAsync(_ dmgURL: URL) {
+        let dmgPath = dmgURL.path
         Task.detached { [self] in
-            let installResult: Result<URL, Error>
+            let result: Result<URL, Error>
             do {
-                installResult = .success(try self.performInstall(dmgPath: dmgURL.path))
+                result = .success(try self.mountCopyRelaunch(dmgPath: dmgPath))
             } catch {
-                installResult = .failure(error)
+                result = .failure(error)
             }
 
             await MainActor.run {
-                switch installResult {
-                case .success(let installedApp):
-                    // Relaunch from the new app
-                    self.relaunch(appURL: installedApp)
+                switch result {
+                case .success(let appURL):
+                    self.statusText = "Restarting..."
+                    self.relaunch(appURL: appURL)
                 case .failure(let error):
-                    // Fallback: open DMG manually
-                    NSWorkspace.shared.open(dmgURL)
+                    self.finishUpdate()
+                    if FileManager.default.fileExists(atPath: dmgPath) {
+                        NSWorkspace.shared.open(dmgURL)
+                    }
                     self.showAlert(
-                        title: "自动安装失败",
-                        message: "\(error.localizedDescription)\n\nDMG 已打开，请手动将 TokenTrackerBar 拖入 Applications 文件夹。",
+                        title: "Installation Failed",
+                        message: "\(error.localizedDescription)\n\nPlease drag TokenTrackerBar into Applications manually.",
                         style: .warning
                     )
                 }
@@ -260,37 +265,27 @@ final class UpdateChecker {
         }
     }
 
-    nonisolated private func performInstall(dmgPath: String) throws -> URL {
-        // 1. Mount DMG
-        let mountProcess = Process()
-        mountProcess.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-        mountProcess.arguments = ["attach", dmgPath, "-nobrowse", "-quiet", "-mountrandom", "/tmp"]
+    // MARK: - Install Logic
 
+    nonisolated private func mountCopyRelaunch(dmgPath: String) throws -> URL {
+        // 1. Mount
+        let mount = Process()
+        mount.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
+        mount.arguments = ["attach", dmgPath, "-nobrowse", "-mountrandom", "/tmp"]
         let mountPipe = Pipe()
-        mountProcess.standardOutput = mountPipe
-        mountProcess.standardError = Pipe()
-        try mountProcess.run()
-        mountProcess.waitUntilExit()
+        mount.standardOutput = mountPipe
+        mount.standardError = Pipe()
+        try mount.run()
+        mount.waitUntilExit()
+        guard mount.terminationStatus == 0 else { throw UpdateError.installFailed("Failed to mount DMG") }
 
-        guard mountProcess.terminationStatus == 0 else {
-            throw UpdateError.installFailed("无法挂载 DMG")
-        }
-
-        // Parse mount point from hdiutil output
         let mountOutput = String(data: mountPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let mountPoint = mountOutput
-            .split(separator: "\n")
-            .last?
-            .split(separator: "\t")
-            .last?
-            .trimmingCharacters(in: .whitespaces) ?? ""
-
+        let mountPoint = mountOutput.split(separator: "\n").last?.split(separator: "\t").last?.trimmingCharacters(in: .whitespaces) ?? ""
         guard !mountPoint.isEmpty, FileManager.default.fileExists(atPath: mountPoint) else {
-            throw UpdateError.installFailed("无法找到挂载点")
+            throw UpdateError.installFailed("Mount point not found")
         }
 
         defer {
-            // Always unmount
             let detach = Process()
             detach.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
             detach.arguments = ["detach", mountPoint, "-quiet", "-force"]
@@ -300,62 +295,55 @@ final class UpdateChecker {
             detach.waitUntilExit()
         }
 
-        // 2. Find .app in mounted DMG
+        // 2. Find .app
         let fm = FileManager.default
         let contents = try fm.contentsOfDirectory(atPath: mountPoint)
         guard let appName = contents.first(where: { $0.hasSuffix(".app") }) else {
-            throw UpdateError.installFailed("DMG 中未找到 .app")
+            throw UpdateError.installFailed("No .app found in DMG")
         }
 
         let sourceApp = URL(fileURLWithPath: mountPoint).appendingPathComponent(appName)
         let destApp = URL(fileURLWithPath: "/Applications").appendingPathComponent(appName)
 
-        // 3. Replace existing app
-        if fm.fileExists(atPath: destApp.path) {
-            try fm.removeItem(at: destApp)
-        }
+        // 3. Replace
+        if fm.fileExists(atPath: destApp.path) { try fm.removeItem(at: destApp) }
         try fm.copyItem(at: sourceApp, to: destApp)
 
-        // 4. Clean up DMG file
+        // 4. Cleanup DMG
         try? fm.removeItem(atPath: dmgPath)
 
         return destApp
     }
 
     private func relaunch(appURL: URL) {
-        // Use open -n to launch the new app, then exit current
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-n", appURL.path, "--args", "--after-update"]
+        process.arguments = ["-n", appURL.path]
         process.standardOutput = Pipe()
         process.standardError = Pipe()
-
         do {
             try process.run()
-            // Give the new process a moment to start
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                NSApp.terminate(nil)
-            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { NSApp.terminate(nil) }
         } catch {
-            showAlert(
-                title: "更新完成",
-                message: "新版本已安装到 /Applications，请手动重启应用。",
-                style: .informational
-            )
+            finishUpdate()
+            showAlert(title: "Update Complete", message: "New version installed to /Applications. Please restart manually.", style: .informational)
         }
     }
+
+    // MARK: - Helpers
 
     private func showAlert(title: String, message: String, style: NSAlert.Style) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = style
-        alert.addButton(withTitle: "好")
+        alert.icon = appIcon
+        alert.addButton(withTitle: "OK")
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
+        NSApp.setActivationPolicy(.accessory)
     }
-
-    // MARK: - Errors
 
     private enum UpdateError: LocalizedError {
         case curlFailed(Int)
@@ -366,11 +354,11 @@ final class UpdateChecker {
 
         var errorDescription: String? {
             switch self {
-            case .curlFailed(let code): return "网络请求失败 (curl exit \(code))，请检查网络连接。"
-            case .emptyResponse: return "服务器返回空响应。"
-            case .downloadFailed: return "文件下载失败，请重试。"
-            case .installFailed(let reason): return "安装失败: \(reason)"
-            case .noRelease: return "暂无发布版本。"
+            case .curlFailed(let code): return "Network request failed (curl exit \(code)). Please check your connection."
+            case .emptyResponse: return "Server returned an empty response."
+            case .downloadFailed: return "File download failed. Please try again."
+            case .installFailed(let reason): return "Installation failed: \(reason)"
+            case .noRelease: return "No release available."
             }
         }
     }

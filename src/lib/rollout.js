@@ -206,7 +206,10 @@ async function parseClaudeIncremental({
   const projectMetaCache = projectEnabled ? new Map() : null;
   const publicRepoCache = projectEnabled ? new Map() : null;
   const touchedBuckets = new Set();
-  const seenMessageHashes = new Set();
+  // Persist seenMessageHashes across syncs to prevent cross-file duplicates
+  // (e.g. subagent file created after main session was already parsed).
+  const prevHashes = Array.isArray(cursors.claudeHashes) ? cursors.claudeHashes : [];
+  const seenMessageHashes = new Set(prevHashes);
   const defaultSource = normalizeSourceInput(source) || "claude";
 
   if (!cursors.files || typeof cursors.files !== "object") {
@@ -285,6 +288,10 @@ async function parseClaudeIncremental({
     projectState.updatedAt = new Date().toISOString();
     cursors.projectHourly = projectState;
   }
+  // Persist message hashes for cross-sync dedup; cap at 100k entries to bound size.
+  const allHashes = Array.from(seenMessageHashes);
+  cursors.claudeHashes =
+    allHashes.length > 100_000 ? allHashes.slice(allHashes.length - 100_000) : allHashes;
 
   return { filesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
 }

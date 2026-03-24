@@ -662,3 +662,40 @@ body {
   }
 }
 
+/* ========================================
+   DateRangePicker — black/white selection
+   ======================================== */
+/* Range start/end/middle share black fill */
+.rdp-selected {
+  background: var(--oai-black) !important;
+  border-radius: 0 !important;
+}
+.rdp-selected .rdp-day-btn {
+  background: transparent !important;
+  color: #fff !important;
+  border-radius: 0 !important;
+}
+/* Only round the outer edge of start/end */
+.rdp-range-start {
+  border-radius: 8px 0 0 8px !important;
+}
+.rdp-range-end {
+  border-radius: 0 8px 8px 0 !important;
+}
+/* Single day selected (start == end) */
+.rdp-range-start.rdp-range-end {
+  border-radius: 8px !important;
+}
+:root.dark .rdp-selected {
+  background: var(--oai-white) !important;
+}
+:root.dark .rdp-selected .rdp-day-btn {
+  background: transparent !important;
+  color: var(--oai-black) !important;
+}
+/* Range middle inherits from .rdp-selected above */
+/* Navigation chevron arrows — dark mode */
+:root.dark .rdp-oai svg.rdp-chevron {
+  fill: var(--oai-gray-400);
+}
+

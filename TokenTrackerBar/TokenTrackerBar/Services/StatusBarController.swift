@@ -110,10 +110,22 @@ final class StatusBarController: NSObject {
         dashboardItem.target = self
         menu.addItem(dashboardItem)
 
-        // Check for Updates
-        let updateItem = NSMenuItem(title: Strings.menuCheckForUpdates, action: #selector(checkForUpdates), keyEquivalent: "u")
+        // Check for Updates — dynamic text when downloading
+        let updateTitle = UpdateChecker.shared.statusText ?? Strings.menuCheckForUpdates
+        let updateItem = NSMenuItem(title: updateTitle, action: #selector(checkForUpdates), keyEquivalent: "u")
         updateItem.target = self
+        if UpdateChecker.shared.isBusy {
+            updateItem.isEnabled = false
+        }
         menu.addItem(updateItem)
+
+        menu.addItem(.separator())
+
+        // About
+        let version = UpdateChecker.shared.currentVersion()
+        let aboutItem = NSMenuItem(title: "TokenTrackerBar v\(version)", action: #selector(openAbout), keyEquivalent: "")
+        aboutItem.target = self
+        menu.addItem(aboutItem)
 
         menu.addItem(.separator())
 
@@ -158,6 +170,12 @@ final class StatusBarController: NSObject {
 
     @objc private func checkForUpdates() {
         UpdateChecker.shared.check(silent: false)
+    }
+
+    @objc private func openAbout() {
+        if let url = URL(string: "https://github.com/mm7894215/tokentracker") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     @objc private func toggleLaunchAtLogin() {

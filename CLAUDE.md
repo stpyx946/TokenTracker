@@ -61,6 +61,40 @@ OpenCode v1.2+ stores messages in `~/.local/share/opencode/opencode.db` (SQLite)
 - UTC timestamps, half-hour bucket aggregation
 - Privacy: token counts only, never prompts or conversation content
 
+## Release Workflow
+
+两个产物需要同步发布，版本号保持一致。
+
+### 版本号规则
+
+- npm (`package.json`) 和 App (`TokenTrackerBar/project.yml` 的 `MARKETING_VERSION`) 使用相同版本号
+- 遵循 semver，bug fix 递增 patch
+
+### 发布步骤
+
+1. 更新 `package.json` 和 `TokenTrackerBar/project.yml` 中的版本号
+2. 构建 App DMG：
+```bash
+cd TokenTrackerBar
+npm run dashboard:build
+./scripts/bundle-node.sh
+xcodegen generate
+ruby scripts/patch-pbxproj-icon.rb
+xcodebuild -scheme TokenTrackerBar -configuration Release clean build
+APP_PATH="$(find ~/Library/Developer/Xcode/DerivedData/TokenTrackerBar-*/Build/Products/Release -name 'TokenTrackerBar.app' -maxdepth 1)"
+bash scripts/create-dmg.sh "$APP_PATH"
+```
+3. 创建 GitHub Release，附带 DMG：
+```bash
+gh release create v<version> TokenTrackerBar/build/TokenTrackerBar.dmg \
+  --title "v<version>" --notes "<一句话说明>"
+```
+4. npm publish 由用户自行执行
+
+### Release Notes 风格
+
+简洁一句话英文，例如 `Fix token stats inflation caused by duplicate queue entries`。不用 markdown 格式，不用分节。
+
 ## OpenSpec Workflow
 
 For significant changes (new features, breaking changes, architecture), create a proposal in `openspec/changes/<id>/`. Bug fixes and formatting skip this process.

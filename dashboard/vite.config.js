@@ -268,6 +268,101 @@ async function runLocalSyncCommand() {
   });
 }
 
+// Per-model pricing (USD per million tokens)
+// Rates per million tokens (USD). Sources: LiteLLM, OpenAI, Google, OpenRouter.
+const MODEL_PRICING = {
+  // ── Anthropic Claude ──
+  "claude-opus-4-6": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+  "claude-opus-4-5-20250414": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },
+  "claude-sonnet-4-6": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  "claude-sonnet-4-5-20250514": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  "claude-sonnet-4-20250514": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  "claude-haiku-4-5-20251001": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
+  "claude-3-5-sonnet-20241022": { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 },
+  "claude-3-5-haiku-20241022": { input: 1, output: 5, cache_read: 0.1, cache_write: 1.25 },
+  // ── OpenAI GPT / Codex ──
+  "gpt-5": { input: 0.625, output: 5, cache_read: 0.125 },
+  "gpt-5-fast": { input: 0.625, output: 5, cache_read: 0.125 },
+  "gpt-5-high": { input: 0.625, output: 5, cache_read: 0.125 },
+  "gpt-5-high-fast": { input: 0.625, output: 5, cache_read: 0.125 },
+  "gpt-5-codex": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gpt-5-codex-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gpt-5.1-codex": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gpt-5.1-codex-mini": { input: 0.25, output: 2, cache_read: 0.025 },
+  "gpt-5.1-codex-max": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gpt-5.1-codex-max-high-fast": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gpt-5.1-codex-max-xhigh-fast": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gpt-5.1-codex-high": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gpt-5.1-codex-max-high": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gpt-5.2": { input: 0.875, output: 7, cache_read: 0.175 },
+  "gpt-5.2-high": { input: 0.875, output: 7, cache_read: 0.175 },
+  "gpt-5.2-high-fast": { input: 0.875, output: 7, cache_read: 0.175 },
+  "gpt-5.2-codex": { input: 1.75, output: 14, cache_read: 0.175 },
+  "gpt-5.2-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
+  "gpt-5.3-codex": { input: 1.75, output: 14, cache_read: 0.175 },
+  "gpt-5.3-codex-high": { input: 1.75, output: 14, cache_read: 0.175 },
+  "gpt-5.4": { input: 2.5, output: 15, cache_read: 0.25 },
+  "gpt-5.4-mini": { input: 0.75, output: 4.5, cache_read: 0.075 },
+  "gpt-5.4-medium": { input: 1.5, output: 10, cache_read: 0.15 },
+  "o3": { input: 2, output: 8, cache_read: 1.0 },
+  // ── Google Gemini (official: ai.google.dev/pricing) ──
+  "gemini-2.5-pro": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gemini-2.5-pro-preview-06-05": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gemini-2.5-pro-preview-05-06": { input: 1.25, output: 10, cache_read: 0.125 },
+  "gemini-2.5-flash": { input: 0.3, output: 2.5, cache_read: 0.03 },
+  "gemini-3-flash-preview": { input: 0.5, output: 3, cache_read: 0.05 },
+  "gemini-3-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
+  "gemini-3.1-pro-preview": { input: 2, output: 12, cache_read: 0.2 },
+  // ── Cursor Composer ──
+  "composer-1": { input: 1.25, output: 10, cache_read: 0.125 },
+  "composer-1.5": { input: 3.5, output: 17.5, cache_read: 0.35 },
+  "composer-2": { input: 0.5, output: 2.5, cache_read: 0.2 },
+  "composer-2-fast": { input: 1.5, output: 7.5, cache_read: 0.15 },
+  // ── Moonshot Kimi (official: platform.moonshot.ai) ──
+  "kimi-for-coding": { input: 0.6, output: 2, cache_read: 0.15 },
+  "kimi-k2.5": { input: 0.6, output: 2, cache_read: 0.15 },
+  "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
+  // ── Misc / Free ──
+  "glm-4.7-free": { input: 0, output: 0, cache_read: 0 },
+  "nemotron-3-super-free": { input: 0, output: 0, cache_read: 0 },
+  "mimo-v2-pro-free": { input: 0, output: 0, cache_read: 0 },
+  "minimax-m2.1-free": { input: 0, output: 0, cache_read: 0 },
+  "MiniMax-M2.1": { input: 0.5, output: 3, cache_read: 0.05 },
+};
+const ZERO_PRICING = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+
+function getModelPricing(model) {
+  if (!model) return ZERO_PRICING;
+  const exact = MODEL_PRICING[model];
+  if (exact) return exact;
+  const lower = model.toLowerCase();
+  if (lower.includes("opus")) return MODEL_PRICING["claude-opus-4-6"];
+  if (lower.includes("haiku")) return MODEL_PRICING["claude-haiku-4-5-20251001"];
+  if (lower.includes("sonnet")) return MODEL_PRICING["claude-sonnet-4-6"];
+  if (lower.includes("gpt-5.4")) return MODEL_PRICING["gpt-5.4"];
+  if (lower.includes("gpt-5.3")) return MODEL_PRICING["gpt-5.3-codex"];
+  if (lower.includes("gpt-5.2")) return MODEL_PRICING["gpt-5.2"];
+  if (lower.includes("gpt-5.1")) return MODEL_PRICING["gpt-5.1-codex"];
+  if (lower.includes("gpt-5")) return MODEL_PRICING["gpt-5"];
+  if (lower.includes("gemini-3")) return MODEL_PRICING["gemini-3-flash-preview"];
+  if (lower.includes("gemini-2.5")) return MODEL_PRICING["gemini-2.5-pro"];
+  if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
+  if (lower.includes("composer")) return MODEL_PRICING["composer-1"];
+  return ZERO_PRICING;
+}
+
+function computeRowCost(row) {
+  const pricing = getModelPricing(row.model);
+  return (
+    ((row.input_tokens || 0) * (pricing.input || 0) +
+      (row.output_tokens || 0) * (pricing.output || 0) +
+      (row.cached_input_tokens || 0) * (pricing.cache_read || 0) +
+      (row.cache_creation_input_tokens || 0) * (pricing.cache_write || 0) +
+      (row.reasoning_output_tokens || 0) * (pricing.output || 0)) /
+    1_000_000
+  );
+}
+
 async function handleLocalApi(req, res, url) {
   const QUEUE_PATH = path.join(os.homedir(), ".tokentracker", "tracker", "queue.jsonl");
 
@@ -275,7 +370,15 @@ async function handleLocalApi(req, res, url) {
     try {
       const raw = fs.readFileSync(QUEUE_PATH, "utf8");
       const lines = raw.split("\n").filter(line => line.trim());
-      return lines.map(line => JSON.parse(line));
+      const parsed = lines.map(line => JSON.parse(line));
+      // Deduplicate: each sync appends cumulative totals per bucket, so for
+      // each (source, model, hour_start) keep only the latest (last) entry.
+      const seen = new Map();
+      for (const row of parsed) {
+        const key = `${row.source || ""}|${row.model || ""}|${row.hour_start || ""}`;
+        seen.set(key, row);
+      }
+      return Array.from(seen.values());
     } catch (error) {
       console.warn("[localDataApi] Failed to read queue.jsonl:", error.message);
       return [];
@@ -293,6 +396,7 @@ async function handleLocalApi(req, res, url) {
           day,
           total_tokens: 0,
           billable_total_tokens: 0,
+          total_cost_usd: 0,
           input_tokens: 0,
           output_tokens: 0,
           cached_input_tokens: 0,
@@ -304,6 +408,7 @@ async function handleLocalApi(req, res, url) {
       const agg = byDay.get(day);
       agg.total_tokens += row.total_tokens || 0;
       agg.billable_total_tokens += row.total_tokens || 0;
+      agg.total_cost_usd += computeRowCost(row);
       agg.input_tokens += row.input_tokens || 0;
       agg.output_tokens += row.output_tokens || 0;
       agg.cached_input_tokens += row.cached_input_tokens || 0;
@@ -352,6 +457,7 @@ async function handleLocalApi(req, res, url) {
     const totals = daily.reduce((acc, row) => {
       acc.total_tokens += row.total_tokens;
       acc.billable_total_tokens += row.billable_total_tokens;
+      acc.total_cost_usd += row.total_cost_usd || 0;
       acc.input_tokens += row.input_tokens;
       acc.output_tokens += row.output_tokens;
       acc.cached_input_tokens += row.cached_input_tokens;
@@ -360,10 +466,10 @@ async function handleLocalApi(req, res, url) {
       acc.conversation_count += row.conversation_count;
       return acc;
     }, {
-      total_tokens: 0, billable_total_tokens: 0, input_tokens: 0,
+      total_tokens: 0, billable_total_tokens: 0, total_cost_usd: 0, input_tokens: 0,
       output_tokens: 0, cached_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_output_tokens: 0, conversation_count: 0,
     });
-    const totalCost = (totals.total_tokens * 1.75) / 1_000_000;
+    const totalCost = totals.total_cost_usd;
 
     // 计算 rolling 统计数据（最近7天和30天）
     const today = new Date();
@@ -547,14 +653,19 @@ async function handleLocalApi(req, res, url) {
 
     // 转换为最终格式
     const sources = Array.from(bySource.values()).map(s => {
-      s.totals.total_cost_usd = ((s.totals.total_tokens * 1.75) / 1_000_000).toFixed(6);
-      s.models = Array.from(s.models.values()).map(m => ({
-        ...m,
-        totals: {
-          ...m.totals,
-          total_cost_usd: ((m.totals.total_tokens * 1.75) / 1_000_000).toFixed(6)
-        }
-      })).sort((a, b) => b.totals.total_tokens - a.totals.total_tokens);
+      s.models = Array.from(s.models.values()).map(m => {
+        const p = getModelPricing(m.model);
+        const cost =
+          ((m.totals.input_tokens || 0) * (p.input || 0) +
+            (m.totals.output_tokens || 0) * (p.output || 0) +
+            (m.totals.cached_input_tokens || 0) * (p.cache_read || 0) +
+            (m.totals.cache_creation_input_tokens || 0) * (p.cache_write || 0) +
+            (m.totals.reasoning_output_tokens || 0) * (p.output || 0)) /
+          1_000_000;
+        return { ...m, totals: { ...m.totals, total_cost_usd: cost.toFixed(6) } };
+      }).sort((a, b) => b.totals.total_tokens - a.totals.total_tokens);
+      const sourceCost = s.models.reduce((sum, m) => sum + Number(m.totals.total_cost_usd), 0);
+      s.totals.total_cost_usd = sourceCost.toFixed(6);
       return s;
     });
 

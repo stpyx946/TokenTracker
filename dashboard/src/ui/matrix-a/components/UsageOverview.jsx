@@ -1,9 +1,11 @@
 import React, { useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { Info } from "lucide-react";
+import { Popover } from "@base-ui/react/popover";
 import { Card, Button, Counter } from "../../openai/components";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { useTheme } from "../../../hooks/useTheme.js";
+import { DateRangePopover, formatDateShort } from "./DateRangePopover.jsx";
 
 function normalizePeriods(periods) {
   if (!Array.isArray(periods)) return [];
@@ -70,6 +72,11 @@ export function UsageOverview({
   onRefresh,
   loading,
   className = "",
+  customFrom,
+  customTo,
+  onCustomRangeApply,
+  customRangeOpen,
+  onCustomRangeOpenChange,
 }) {
   const tabs = normalizePeriods(periods);
   const summaryCounterValue = parseAnimatedCounterValue(String(summaryValue ?? ""));
@@ -89,22 +96,69 @@ export function UsageOverview({
         {/* Header: Period Tabs + Refresh */}
         <div className="flex items-center justify-between gap-3 mb-6">
           <div role="tablist" aria-label="Time period" className="flex gap-1">
-            {tabs.map((p) => (
-              <button
-                key={p.key}
-                role="tab"
-                aria-selected={period === p.key}
-                type="button"
-                className={`text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${
-                  period === p.key
-                    ? "text-oai-black dark:text-oai-white bg-oai-gray-100 dark:bg-oai-gray-800"
-                    : "text-oai-gray-500 dark:text-oai-gray-300 hover:text-oai-black dark:hover:text-oai-white hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800"
-                }`}
-                onClick={() => onPeriodChange?.(p.key)}
-              >
-                {p.label}
-              </button>
-            ))}
+            {tabs.map((p) => {
+              const isActive = period === p.key;
+              const tabClass = `text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${
+                isActive
+                  ? "text-oai-black dark:text-oai-white bg-oai-gray-100 dark:bg-oai-gray-800"
+                  : "text-oai-gray-500 dark:text-oai-gray-300 hover:text-oai-black dark:hover:text-oai-white hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800"
+              }`;
+
+              if (p.key === "custom") {
+                const customLabel = isActive && customFrom && customTo
+                  ? `${formatDateShort(customFrom)} — ${formatDateShort(customTo)}`
+                  : p.label;
+
+                return (
+                  <Popover.Root
+                    key="custom"
+                    open={customRangeOpen}
+                    onOpenChange={(open) => {
+                      if (open) onPeriodChange?.("custom");
+                      else onCustomRangeOpenChange?.(open);
+                    }}
+                  >
+                    <Popover.Trigger
+                      render={
+                        <button
+                          role="tab"
+                          aria-selected={isActive}
+                          type="button"
+                          className={tabClass}
+                        />
+                      }
+                    >
+                      {customLabel}
+                    </Popover.Trigger>
+                    <Popover.Portal>
+                      <Popover.Positioner sideOffset={8} side="bottom" align="start" className="!z-[9999]">
+                        <Popover.Popup className="bg-white dark:bg-oai-gray-900 border border-oai-gray-200 dark:border-oai-gray-700 rounded-xl shadow-lg">
+                          <DateRangePopover
+                            from={customFrom}
+                            to={customTo}
+                            onApply={onCustomRangeApply}
+                            onCancel={() => onCustomRangeOpenChange?.(false)}
+                          />
+                        </Popover.Popup>
+                      </Popover.Positioner>
+                    </Popover.Portal>
+                  </Popover.Root>
+                );
+              }
+
+              return (
+                <button
+                  key={p.key}
+                  role="tab"
+                  aria-selected={isActive}
+                  type="button"
+                  className={tabClass}
+                  onClick={() => onPeriodChange?.(p.key)}
+                >
+                  {p.label}
+                </button>
+              );
+            })}
           </div>
           {onRefresh && (
             <RefreshButton loading={loading} onClick={onRefresh} />
