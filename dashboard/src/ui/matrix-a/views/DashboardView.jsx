@@ -7,6 +7,7 @@ import { StatsPanel } from "../components/StatsPanel.jsx";
 import { UsageOverview } from "../components/UsageOverview.jsx";
 import { TrendMonitor } from "../components/TrendMonitor.jsx";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
+import { MacAppBanner } from "../components/MacAppBanner.jsx";
 
 export function DashboardView(props) {
   const {
@@ -30,6 +31,7 @@ export function DashboardView(props) {
     topModels,
     signedIn,
     publicMode,
+    isLocalMode,
     shouldShowInstall,
     installPrompt,
     handleCopyInstall,
@@ -130,6 +132,12 @@ export function DashboardView(props) {
                     </div>
                   </div>
                 ) : null}
+                {isLocalMode ? (
+                  <FadeIn delay={0.1}>
+                    <MacAppBanner />
+                  </FadeIn>
+                ) : null}
+
                 <StatsPanel
                   title={copy("dashboard.identity.title")}
                   subtitle={copy("dashboard.identity.subtitle")}

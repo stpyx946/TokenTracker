@@ -1373,6 +1373,7 @@ export function DashboardPage({
       topModels={topModels}
       signedIn={signedIn}
       publicMode={publicMode}
+      isLocalMode={isLocalMode}
       shouldShowInstall={shouldShowInstall}
       installPrompt={installPrompt}
       handleCopyInstall={handleCopyInstall}

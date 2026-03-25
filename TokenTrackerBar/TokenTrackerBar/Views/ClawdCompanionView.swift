@@ -65,7 +65,7 @@ struct ClawdCompanionView: View {
             .background {
                 BubbleShape()
                     .fill(.regularMaterial)
-                    .shadow(color: .black.opacity(0.03), radius: 1, y: 0.5)
+                    .shadow(color: .black.opacity(0.08), radius: 1.5, y: 0.5)
             }
             .scaleEffect(hoveringBubble ? 1.03 : 1.0)
             .animation(.easeOut(duration: 0.12), value: hoveringBubble)

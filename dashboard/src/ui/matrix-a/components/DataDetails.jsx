@@ -121,7 +121,7 @@ export function DataDetails({
               {dailyEmptySuffix}
             </div>
           ) : (
-          <div className="overflow-auto max-h-[320px] -mx-4 oai-scrollbar">
+          <div className="overflow-auto max-h-[384px] -mx-4 oai-scrollbar">
             <table className="w-full border-collapse">
               <thead className="sticky top-0 z-10">
                 <tr className="border-b border-oai-gray-200 dark:border-oai-gray-700">

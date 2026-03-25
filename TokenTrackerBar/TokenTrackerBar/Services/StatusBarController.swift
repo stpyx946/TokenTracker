@@ -5,13 +5,25 @@ import SwiftUI
 @MainActor
 final class StatusBarController: NSObject {
 
-    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let viewModel: DashboardViewModel
     private let serverManager: ServerManager
     private let launchAtLoginManager: LaunchAtLoginManager
     private var animator: MenuBarAnimator?
     private var cancellables = Set<AnyCancellable>()
+    private let menuBarHeight: CGFloat = 22
+    private let menuBarIconSize = NSSize(width: 22, height: 22)
+    private let emptyAttributedTitle = NSAttributedString(string: "")
+
+    private static let showStatsKey = "MenuBarShowStats"
+    private var showStats: Bool {
+        get { UserDefaults.standard.object(forKey: Self.showStatsKey) as? Bool ?? true }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.showStatsKey)
+            updateStatsDisplay()
+        }
+    }
 
     // MARK: - Init
 
@@ -42,6 +54,11 @@ final class StatusBarController: NSObject {
         button.target = self
 
         animator = MenuBarAnimator(button: button)
+        animator?.onImageUpdated = { [weak self] _ in
+            guard let self, self.showStats, self.viewModel.todayTokens > 0 else { return }
+            self.updateStatsDisplay()
+        }
+        updateStatsDisplay()
     }
 
     private func observeSyncState() {
@@ -51,6 +68,128 @@ final class StatusBarController: NSObject {
                 self?.animator?.setState(syncing ? .syncing : .idle)
             }
             .store(in: &cancellables)
+
+        // Update stats text when today data changes
+        viewModel.$todaySummary
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.updateStatsDisplay() }
+            .store(in: &cancellables)
+    }
+
+    private func updateStatsDisplay() {
+        guard let button = statusItem.button else { return }
+
+        if showStats && viewModel.todayTokens > 0 {
+            let compositeImage = makeStatsMenuBarImage(
+                icon: animator?.currentImage ?? button.image,
+                tokens: TokenFormatter.formatCompact(viewModel.todayTokens),
+                cost: viewModel.todayCost
+            )
+
+            button.title = ""
+            button.attributedTitle = emptyAttributedTitle
+            button.imagePosition = .imageOnly
+            button.image = compositeImage
+            statusItem.length = compositeImage.size.width
+        } else {
+            button.title = ""
+            button.attributedTitle = emptyAttributedTitle
+            button.imagePosition = .imageOnly
+            statusItem.length = NSStatusItem.squareLength
+            animator?.applyCurrentState()
+        }
+    }
+
+    private func makeStatsMenuBarImage(icon: NSImage?, tokens: String, cost: String) -> NSImage {
+        let valueFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        let labelFont = NSFont.systemFont(ofSize: 7, weight: .regular)
+        let valueColor = NSColor.labelColor
+        let labelColor = NSColor.labelColor
+
+        let tokenValue = NSAttributedString(string: tokens, attributes: [
+            .font: valueFont,
+            .foregroundColor: valueColor,
+        ])
+        let costValue = NSAttributedString(string: cost, attributes: [
+            .font: valueFont,
+            .foregroundColor: valueColor,
+        ])
+        let tokenLabel = NSAttributedString(string: "TOKEN", attributes: [
+            .font: labelFont,
+            .foregroundColor: labelColor,
+        ])
+        let costLabel = NSAttributedString(string: "COST", attributes: [
+            .font: labelFont,
+            .foregroundColor: labelColor,
+        ])
+
+        let tokenColumnWidth = ceil(max(tokenValue.size().width, tokenLabel.size().width))
+        let costColumnWidth = ceil(max(costValue.size().width, costLabel.size().width))
+        let columnGap: CGFloat = 6
+        let iconTrailingPadding: CGFloat = 6
+        let trailingPadding: CGFloat = 3
+        let lineGap: CGFloat = -1
+
+        let valueHeight = ceil(max(valueFont.ascender - valueFont.descender, tokenValue.size().height))
+        let labelHeight = ceil(max(labelFont.ascender - labelFont.descender, tokenLabel.size().height))
+        let textBlockHeight = valueHeight + lineGap + labelHeight
+        let textOriginY = floor((menuBarHeight - textBlockHeight) / 2)
+        let labelOriginY = textOriginY
+        let valueOriginY = labelOriginY + labelHeight + lineGap
+
+        let iconWidth = menuBarIconSize.width
+        let textOriginX = iconWidth + iconTrailingPadding
+        let sepGap: CGFloat = 5  // gap on each side of separator
+        let totalWidth = ceil(textOriginX + tokenColumnWidth + sepGap + 1 + sepGap + costColumnWidth + trailingPadding)
+        let imageSize = NSSize(width: totalWidth, height: menuBarHeight)
+
+        let image = NSImage(size: imageSize, flipped: false) { [weak self] _ in
+            guard let self else { return false }
+
+            if let icon {
+                let iconRect = NSRect(origin: .zero, size: self.menuBarIconSize)
+                // Template icons are black alpha — tint to labelColor for compositing
+                if icon.isTemplate {
+                    icon.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1)
+                    NSColor.labelColor.setFill()
+                    iconRect.fill(using: .sourceAtop)
+                } else {
+                    icon.draw(in: iconRect, from: .zero, operation: .sourceOver, fraction: 1)
+                }
+            }
+
+            let col2X = textOriginX + tokenColumnWidth + sepGap + 1 + sepGap
+
+            let tokenRect = NSRect(x: textOriginX, y: valueOriginY, width: tokenColumnWidth, height: valueHeight)
+            let costRect = NSRect(x: col2X, y: valueOriginY, width: costColumnWidth, height: valueHeight)
+            let tokenLabelRect = NSRect(x: textOriginX, y: labelOriginY, width: tokenColumnWidth, height: labelHeight)
+            let costLabelRect = NSRect(x: col2X, y: labelOriginY, width: costColumnWidth, height: labelHeight)
+
+            tokenValue.draw(in: self.centeredRect(for: tokenValue, in: tokenRect))
+            costValue.draw(in: self.centeredRect(for: costValue, in: costRect))
+            tokenLabel.draw(in: self.centeredRect(for: tokenLabel, in: tokenLabelRect))
+            costLabel.draw(in: self.centeredRect(for: costLabel, in: costLabelRect))
+
+            // Separator line between columns
+            let sepX = textOriginX + tokenColumnWidth + sepGap
+            NSColor.labelColor.withAlphaComponent(0.5).setFill()
+            NSRect(x: sepX, y: labelOriginY + 1, width: 0.5, height: textBlockHeight - 2).fill()
+
+            return true
+        }
+
+        image.isTemplate = false
+        return image
+    }
+
+    private func centeredRect(for string: NSAttributedString, in rect: NSRect) -> NSRect {
+        let size = string.size()
+        return NSRect(
+            x: rect.minX + floor((rect.width - size.width) / 2),
+            y: rect.minY + floor((rect.height - size.height) / 2),
+            width: ceil(size.width),
+            height: ceil(size.height)
+        )
     }
 
     // MARK: - Popover
@@ -144,6 +283,12 @@ final class StatusBarController: NSObject {
 
         menu.addItem(.separator())
 
+        // Show Stats in Menu Bar (toggle)
+        let statsItem = NSMenuItem(title: "Show Stats in Menu Bar", action: #selector(toggleStats), keyEquivalent: "")
+        statsItem.target = self
+        statsItem.state = showStats ? .on : .off
+        menu.addItem(statsItem)
+
         // Animated Icon (toggle)
         let animItem = NSMenuItem(title: "Animated Icon", action: #selector(toggleAnimation), keyEquivalent: "")
         animItem.target = self
@@ -184,7 +329,7 @@ final class StatusBarController: NSObject {
     }
 
     @objc private func openDashboard() {
-        if let url = URL(string: Constants.serverBaseURL) {
+        if let url = URL(string: Constants.serverBaseURL + "?from=menubar") {
             NSWorkspace.shared.open(url)
         }
     }
@@ -197,6 +342,10 @@ final class StatusBarController: NSObject {
         if let url = URL(string: "https://github.com/mm7894215/tokentracker") {
             NSWorkspace.shared.open(url)
         }
+    }
+
+    @objc private func toggleStats() {
+        showStats.toggle()
     }
 
     @objc private func toggleAnimation() {

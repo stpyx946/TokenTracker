@@ -21,6 +21,7 @@ final class MenuBarAnimator {
     private var blinkTimer: Timer?
     private var frameIndex = 0
     private(set) var currentState: State = .idle
+    private var renderedImage: NSImage
 
     /// UserDefaults key for animation toggle
     private static let enabledKey = "MenuBarAnimationEnabled"
@@ -29,15 +30,20 @@ final class MenuBarAnimator {
     private let fallbackIcon: NSImage
 
     // SVG → canvas transform:
-    // scale 1.2pt per SVG unit, character top at SVG y=6
-    // canvas offset: x = (18 - 15*1.2)/2 = 0, y = (18 - 9*1.2)/2 = 3.6
-    private let px: CGFloat = 1.2
+    // scale 1.4pt per SVG unit, character top at SVG y=6
+    // canvas: 22x22 (matches menu bar height)
+    // x offset: (22 - 15*1.4)/2 = 0.5, y offset: (22 - 9*1.4)/2 = 4.7
+    private let px: CGFloat = 1.54
     private let svgYBase: CGFloat = 6
-    private let offsetX: CGFloat = 0
-    private let offsetY: CGFloat = 3.6
-    private let canvasSize = NSSize(width: 18, height: 18)
+    private let offsetX: CGFloat = -0.1
+    private let offsetY: CGFloat = 4.07
+    private let canvasSize = NSSize(width: 22, height: 22)
 
     // Pre-rendered frames
+    /// The current icon image (for external use, e.g. stats rendering)
+    var currentImage: NSImage { renderedImage }
+    var onImageUpdated: ((NSImage) -> Void)?
+
     private lazy var idleFrame = buildFrame(eyesClosed: false, yShift: 0)
     private lazy var blinkFrame = buildFrame(eyesClosed: true, yShift: 0)
     private lazy var syncFrames = buildSyncFrames()
@@ -58,6 +64,7 @@ final class MenuBarAnimator {
         let icon = NSImage(named: "MenuBarIcon") ?? NSImage()
         icon.isTemplate = true
         self.fallbackIcon = icon
+        self.renderedImage = icon
         applyCurrentState()
     }
 
@@ -69,24 +76,24 @@ final class MenuBarAnimator {
         applyCurrentState()
     }
 
-    private func applyCurrentState() {
+    func applyCurrentState() {
         frameIndex = 0
         stopAnimation()
         cancelBlink()
 
         guard isEnabled else {
-            button?.image = fallbackIcon
+            setButtonImage(fallbackIcon)
             return
         }
 
         if reduceMotion {
-            button?.image = idleFrame
+            setButtonImage(idleFrame)
             return
         }
 
         switch currentState {
         case .idle:
-            button?.image = idleFrame
+            setButtonImage(idleFrame)
             scheduleNextBlink()
         case .syncing:
             startAnimation(interval: 0.15)
@@ -109,7 +116,7 @@ final class MenuBarAnimator {
 
     private func tick() {
         guard currentState == .syncing, !syncFrames.isEmpty else { return }
-        button?.image = syncFrames[frameIndex % syncFrames.count]
+        setButtonImage(syncFrames[frameIndex % syncFrames.count])
         frameIndex += 1
     }
 
@@ -133,10 +140,10 @@ final class MenuBarAnimator {
             if currentState == .idle { scheduleNextBlink() }
             return
         }
-        button?.image = blinkFrame
+        setButtonImage(blinkFrame)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self, self.currentState == .idle else { return }
-            self.button?.image = self.idleFrame
+            self.setButtonImage(self.idleFrame)
             self.scheduleNextBlink()
         }
     }
@@ -202,6 +209,12 @@ final class MenuBarAnimator {
     }
 
     // MARK: - Helpers
+
+    private func setButtonImage(_ image: NSImage) {
+        renderedImage = image
+        button?.image = image
+        onImageUpdated?(image)
+    }
 
     private var reduceMotion: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
