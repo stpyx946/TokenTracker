@@ -249,7 +249,7 @@ test("collectLocalSubscriptions includes OpenClaw when session plugin is configu
     const home = tmp;
     const pluginEntryDir = path.join(
       home,
-      ".vibeusage",
+      ".tokentracker",
       "tracker",
       "openclaw-plugin",
       "openclaw-session-sync",
@@ -257,7 +257,7 @@ test("collectLocalSubscriptions includes OpenClaw when session plugin is configu
     await fs.mkdir(pluginEntryDir, { recursive: true });
     await fs.writeFile(
       path.join(pluginEntryDir, "package.json"),
-      '{"name":"@vibeusage/openclaw-session-sync"}\n',
+      '{"name":"@tokentracker/openclaw-session-sync"}\n',
       "utf8",
     );
     await fs.writeFile(path.join(pluginEntryDir, "index.js"), "export default {};\n", "utf8");
