@@ -181,6 +181,29 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     // MARK: - WKNavigationDelegate
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard let url = navigationAction.request.url else {
+            decisionHandler(.allow)
+            return
+        }
+        // Allow local dashboard navigation
+        if url.host == "localhost" || url.host == "127.0.0.1" {
+            decisionHandler(.allow)
+            return
+        }
+        // External links → open in system browser
+        if url.scheme == "http" || url.scheme == "https" {
+            NSWorkspace.shared.open(url)
+            decisionHandler(.cancel)
+            return
+        }
+        decisionHandler(.allow)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         // 禁用文本选中 + 为透明标题栏留出顶部间距
         let css = """
