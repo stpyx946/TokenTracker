@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { motion } from "motion/react";
 import { Shell, Card, Button } from "../../openai/components";
 import { CostAnalysisModal } from "../components/CostAnalysisModal.jsx";
@@ -8,6 +8,7 @@ import { UsageOverview } from "../components/UsageOverview.jsx";
 import { TrendMonitor } from "../components/TrendMonitor.jsx";
 import { FadeIn } from "../../foundation/FadeIn.jsx";
 import { MacAppBanner } from "../components/MacAppBanner.jsx";
+import { UsageLimitsPanel } from "../components/UsageLimitsPanel.jsx";
 
 export function DashboardView(props) {
   const {
@@ -87,11 +88,25 @@ export function DashboardView(props) {
     detailsPageCount,
     detailsPage,
     setDetailsPage,
+    usageLimits,
   } = props;
 
   // Header 和 Footer 已简化
   const header = null;
   const footer = null;
+
+  // Measure left column height so right column can match it
+  const leftColRef = useRef(null);
+  const [leftColHeight, setLeftColHeight] = useState(0);
+  useEffect(() => {
+    const el = leftColRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([entry]) => {
+      setLeftColHeight(entry.contentRect.height);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <>
@@ -104,7 +119,7 @@ export function DashboardView(props) {
         {(showExpiredGate || showAuthGate) ? null : (
           <>
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-              <div className="lg:col-span-4 flex flex-col gap-4 min-w-0">
+              <div ref={leftColRef} className="lg:col-span-4 flex flex-col gap-4 min-w-0">
                 {screenshotMode ? (
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex flex-col gap-1">
@@ -129,6 +144,15 @@ export function DashboardView(props) {
                   periodConversations={summaryConversationsValue}
                   rolling={rollingUsage}
                   topModels={topModels}
+                />
+
+                <UsageLimitsPanel
+                  claude={usageLimits?.claude}
+                  codex={usageLimits?.codex}
+                  cursor={usageLimits?.cursor}
+                  gemini={usageLimits?.gemini}
+                  kiro={usageLimits?.kiro}
+                  antigravity={usageLimits?.antigravity}
                 />
 
                 {shouldShowInstall ? (
@@ -193,7 +217,10 @@ export function DashboardView(props) {
                 ) : null}
               </div>
 
-              <div className="lg:col-span-8 flex flex-col gap-4 min-w-0">
+              <div
+                className="lg:col-span-8 flex flex-col gap-4 min-w-0"
+                style={leftColHeight ? { maxHeight: leftColHeight } : undefined}
+              >
                 <UsageOverview
                   period={period}
                   periods={periodsForDisplay}
@@ -213,7 +240,7 @@ export function DashboardView(props) {
                 />
 
                 {!screenshotMode ? (
-                  <FadeIn delay={0.5}>
+                  <FadeIn delay={0.5} className="flex-1 flex flex-col min-h-0">
                     <DataDetails
                     projectEntries={projectUsageEntries}
                     projectLimit={projectUsageLimit}
