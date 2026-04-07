@@ -102,6 +102,50 @@ hdiutil create \
     -size "${DMG_SIZE_KB}k" \
     "$TEMP_DMG"
 
+# --- CI mode: bypass our hdiutil pipeline entirely and use the Homebrew
+#     `create-dmg` tool, which writes the .DS_Store directly (no Finder/AppleScript
+#     needed). This is the only way to get the background + icon layout on a
+#     headless macOS runner. ---
+if [[ "${CI:-}" == "true" ]]; then
+    if ! command -v create-dmg >/dev/null 2>&1; then
+        echo "Error: CI mode requires the Homebrew 'create-dmg' tool."
+        echo "  brew install create-dmg"
+        exit 1
+    fi
+
+    echo "==> CI mode: using Homebrew create-dmg for headless DMG layout"
+
+    BG_ARGS=()
+    if $HAS_BG; then
+        BG_ARGS=(--background "$BG_IMAGE")
+    fi
+
+    # The Homebrew create-dmg tool stages the .app, builds the DMG, applies
+    # background + icon positions, and finalizes — all without Finder.
+    # Note: it expects to create the OUTPUT file, so remove any leftover.
+    rm -f "$FINAL_DMG"
+    create-dmg \
+        --volname "$VOLUME_NAME" \
+        --window-pos 200 120 \
+        --window-size "$WIN_W" "$WIN_H" \
+        --icon-size "$ICON_SIZE" \
+        --icon "${APP_NAME}.app" "$APP_X" "$APP_Y" \
+        --app-drop-link "$APPS_X" "$APPS_Y" \
+        "${BG_ARGS[@]}" \
+        "$FINAL_DMG" \
+        "$APP_PATH"
+
+    FINAL_SIZE=$(du -sh "$FINAL_DMG" | cut -f1)
+    echo ""
+    echo "================================================"
+    echo "  DMG created successfully (CI path)!"
+    echo "  Output: $FINAL_DMG"
+    echo "  Size:   $FINAL_SIZE"
+    echo "================================================"
+    rm -f "$TEMP_DMG"
+    exit 0
+fi
+
 # --- Mount and customize ---
 echo "==> Mounting and customizing..."
 # Detach any existing volume with same name
@@ -114,13 +158,8 @@ MOUNT_DEV=$(echo "$MOUNT_OUTPUT" | head -1 | awk '{print $1}')
 
 echo "==> Mounted at: $MOUNT_DIR"
 
-# Apply Finder customizations via AppleScript
-# --- Customize DMG window (skip on headless CI) ---
-if [[ "${CI:-}" == "true" ]]; then
-    echo "==> CI mode: skipping Finder customization"
-    hdiutil detach "$MOUNT_DEV" -quiet 2>/dev/null || hdiutil detach "$MOUNT_DIR" -quiet 2>/dev/null || true
-    sleep 1
-else
+# Apply Finder customizations via AppleScript (local interactive path)
+if true; then
     if $HAS_BG; then
         BG_CLAUSE='set background picture of viewOptions to POSIX file "'$MOUNT_DIR'/.background/background.png"'
     else
