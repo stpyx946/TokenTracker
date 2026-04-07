@@ -19,6 +19,11 @@ final class StatusBarController: NSObject {
     private let launchAtLoginManager: LaunchAtLoginManager
     private var animator: MenuBarAnimator?
     private var cancellables = Set<AnyCancellable>()
+    /// While the status-item menu is open, refreshes the “Check for Updates” row when download/check status changes.
+    private var updateMenuStatusObserver: NSObjectProtocol?
+    private weak var trackedStatusMenu: NSMenu?
+    private static let updateMenuItemTag = 4_242
+
     private let menuBarHeight: CGFloat = 22
     private let menuBarIconSize = NSSize(width: 22, height: 22)
     private let emptyAttributedTitle = NSAttributedString(string: "")
@@ -312,14 +317,15 @@ final class StatusBarController: NSObject {
         dashboardItem.target = self
         menu.addItem(dashboardItem)
 
-        // Check for Updates — dynamic text when downloading
+        // Check for Updates — dynamic text when downloading (refreshes via Notification while menu stays open)
         let updateTitle = UpdateChecker.shared.statusText ?? Strings.menuCheckForUpdates
         let updateItem = NSMenuItem(title: updateTitle, action: #selector(checkForUpdates), keyEquivalent: "u")
+        updateItem.tag = Self.updateMenuItemTag
         updateItem.target = self
-        if UpdateChecker.shared.isBusy {
-            updateItem.isEnabled = false
-        }
+        updateItem.isEnabled = !UpdateChecker.shared.isBusy
         menu.addItem(updateItem)
+
+        menu.delegate = self
 
         menu.addItem(.separator())
 
@@ -418,5 +424,45 @@ final class StatusBarController: NSObject {
 
         let formatted = TokenFormatter.formatCompact(tokens)
         return "\(Strings.todayTitle): \(formatted) tokens · \(cost)"
+    }
+
+    private func applyUpdateMenuItemState(in menu: NSMenu) {
+        guard let item = menu.item(withTag: Self.updateMenuItemTag) else { return }
+        let title = UpdateChecker.shared.statusText ?? Strings.menuCheckForUpdates
+        if item.title != title {
+            item.title = title
+        }
+        let enabled = !UpdateChecker.shared.isBusy
+        if item.isEnabled != enabled {
+            item.isEnabled = enabled
+        }
+    }
+}
+
+// MARK: - NSMenuDelegate (live update row while menu is open)
+
+@MainActor
+extension StatusBarController: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        trackedStatusMenu = menu
+        updateMenuStatusObserver = NotificationCenter.default.addObserver(
+            forName: .updateCheckerStatusDidChange,
+            object: UpdateChecker.shared,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let menu = self.trackedStatusMenu else { return }
+                self.applyUpdateMenuItemState(in: menu)
+            }
+        }
+        applyUpdateMenuItemState(in: menu)
+    }
+
+    func menuDidClose(_ menu: NSMenu) {
+        trackedStatusMenu = nil
+        if let observer = updateMenuStatusObserver {
+            NotificationCenter.default.removeObserver(observer)
+            updateMenuStatusObserver = nil
+        }
     }
 }

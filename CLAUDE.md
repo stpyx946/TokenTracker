@@ -222,6 +222,8 @@ When a feature or fix is significant enough to ship, **ask the user whether to b
 
 When the user says "release" or "发 release", execute these steps:
 
+Treat a release request as explicit approval to create the required release commit(s) and push them to the remote branch as part of the release workflow. Do not ask again for separate commit/push permission once the user has requested a release.
+
 1. Bump version in `package.json` (and `TokenTrackerBar/project.yml` if App changed)
 2. Commit and push to `main` → npm publishes automatically
 3. If App changed: run `gh workflow run "release DMG" -f version=X.Y.Z` → cloud builds DMG + creates GitHub Release

@@ -10,14 +10,23 @@ final class UpdateChecker {
     private let releaseURL: String = "https://github.com/mm7894215/TokenTracker/releases/latest"
 
     /// Observable status for menu item display
-    private(set) var statusText: String? = nil
-    private(set) var isBusy = false
+    private(set) var statusText: String? = nil {
+        didSet { postStatusDidChangeNotification() }
+    }
+
+    private(set) var isBusy = false {
+        didSet { postStatusDidChangeNotification() }
+    }
 
     /// Retain delegate until download completes (URLSession holds weak ref only)
     private var activeDownloadDelegate: DownloadProgressDelegate?
 
     /// Cached app icon for alerts (capture before activationPolicy changes)
     private lazy var appIcon: NSImage? = NSApp.applicationIconImage
+
+    private func postStatusDidChangeNotification() {
+        NotificationCenter.default.post(name: .updateCheckerStatusDidChange, object: self)
+    }
 
     // MARK: - Public
 
@@ -498,4 +507,9 @@ final class UpdateChecker {
             }
         }
     }
+}
+
+extension Notification.Name {
+    /// Posted when `UpdateChecker.shared.statusText` or `isBusy` changes (menu bar can refresh without polling).
+    static let updateCheckerStatusDidChange = Notification.Name("UpdateCheckerStatusDidChange")
 }
